@@ -449,7 +449,15 @@ function buildRubiconScanScript() {
       Object.keys(data).forEach(function (key) {
         const val = data[key];
         if (val === null || typeof val !== 'object') {
-          baseAttrs.push({ attr: key, value: val === null || val === undefined ? '' : String(val), empty: isEmptyVal(val), issues: validateValue(key, val) });
+          // null(대소문자 무관, 따옴표 없는 리터럴)은 "값이 비어서 누락"이 아니라
+          // "기간이 없다" 같은 의도적인 값으로 쓰이므로 빈값으로 표시하지 않는다.
+          const isNullValue = val === null;
+          baseAttrs.push({
+            attr: key,
+            value: isNullValue ? 'null' : (val === undefined ? '' : String(val)),
+            empty: isNullValue ? false : isEmptyVal(val),
+            issues: validateValue(key, val)
+          });
         }
       });
       if (baseAttrs.length > 0) {
@@ -465,7 +473,15 @@ function buildRubiconScanScript() {
               Object.keys(item).forEach(function (k2) {
                 const v2 = item[k2];
                 if (v2 === null || typeof v2 !== 'object') {
-                  attrs.push({ attr: k2, value: v2 === null || v2 === undefined ? '' : String(v2), empty: isEmptyVal(v2), issues: validateValue(k2, v2) });
+                  // null(대소문자 무관, 따옴표 없는 리터럴)은 "값이 비어서 누락"이 아니라
+                  // "기간이 없다" 같은 의도적인 값으로 쓰이므로 빈값으로 표시하지 않는다.
+                  const isNullValue = v2 === null;
+                  attrs.push({
+                    attr: k2,
+                    value: isNullValue ? 'null' : (v2 === undefined ? '' : String(v2)),
+                    empty: isNullValue ? false : isEmptyVal(v2),
+                    issues: validateValue(k2, v2)
+                  });
                 }
               });
               results.push({ kind: 'json', label: key + ' #' + (idx + 1), path: path, group: groupKey, attrs: attrs });
