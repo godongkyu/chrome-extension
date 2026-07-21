@@ -264,6 +264,28 @@ function buildRubiconScanScript() {
         if (ch === ' ' || ch === '\\t' || ch === '\\r') {
           continue;
         }
+        if (ch === ':') {
+          // 콜론 다음에 오는 값이 따옴표/객체/배열/숫자/true·false·null(대소문자 무관)
+          // 중 무엇도 아니면, 문자열 값인데 여는 따옴표가 빠진 것으로 본다. 이걸 그냥
+          // 두면 뒤에 있는 진짜 닫는 따옴표를 여는 따옴표로 착각해서 그 다음부터
+          // 전부 잘못 해석된다.
+          let k = i + 1;
+          while (k < text.length && /[ \\t\\r\\n]/.test(text[k])) k++;
+          const startCh = text[k];
+          if (startCh !== undefined) {
+            const isQuote = startCh === '"';
+            const isBracket = startCh === '{' || startCh === '[';
+            const isNumberStart = /[0-9\\-]/.test(startCh);
+            const restSlice = text.slice(k, k + 5).toLowerCase();
+            const isBooleanOrNull = restSlice.indexOf('true') === 0 || restSlice.indexOf('false') === 0 || restSlice.indexOf('null') === 0;
+            if (!isQuote && !isBracket && !isNumberStart && !isBooleanOrNull) {
+              issues.push({ message: '여기서 " 가 빠져서 문자열이 아닌 값으로 잘못 해석되고 있습니다', index: k });
+              insertions.push({ index: k, char: '"' });
+            }
+          }
+          lastNonSpaceChar = ch;
+          continue;
+        }
         if (ch === '"') {
           inString = true;
           lastNonSpaceChar = ch;
