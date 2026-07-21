@@ -180,11 +180,21 @@ function buildRubiconScanScript() {
       if (/([!?.,])\\1{1,}/.test(str)) issues.push('반복된 특수문자');
       if (/<[a-z][^>]*>/i.test(str)) issues.push('HTML 태그 잔존');
 
-      [['(', ')'], ['[', ']'], ['{', '}']].forEach(function (p) {
-        const openCount = str.split(p[0]).length - 1;
-        const closeCount = str.split(p[1]).length - 1;
-        if (openCount !== closeCount) issues.push('괄호 짝 안맞음(' + p[0] + p[1] + ')');
-      });
+      // split()으로 6번 훑는 대신 한 번의 순회로 여섯 종류 괄호 개수를 같이 센다
+      // (benefit_cautions/benefit_description처럼 긴 텍스트 필드가 많을 때 비용 절감)
+      let openParen = 0, closeParen = 0, openBracket = 0, closeBracket = 0, openBrace = 0, closeBrace = 0;
+      for (let ci = 0; ci < str.length; ci++) {
+        const c = str[ci];
+        if (c === '(') openParen++;
+        else if (c === ')') closeParen++;
+        else if (c === '[') openBracket++;
+        else if (c === ']') closeBracket++;
+        else if (c === '{') openBrace++;
+        else if (c === '}') closeBrace++;
+      }
+      if (openParen !== closeParen) issues.push('괄호 짝 안맞음(()');
+      if (openBracket !== closeBracket) issues.push('괄호 짝 안맞음([])');
+      if (openBrace !== closeBrace) issues.push('괄호 짝 안맞음({})');
 
       const trimmedStr = str.trim();
       const looksLikeUrl = /url/i.test(key)
@@ -262,6 +272,28 @@ function buildRubiconScanScript() {
           continue;
         }
         if (ch === ' ' || ch === '\\t' || ch === '\\r') {
+          continue;
+        }
+        if (ch === ':') {
+          // 콜론 다음에 오는 값이 따옴표/객체/배열/숫자/true·false·null(대소문자 무관)
+          // 중 무엇도 아니면, 문자열 값인데 여는 따옴표가 빠진 것으로 본다. 이걸 그냥
+          // 두면 뒤에 있는 진짜 닫는 따옴표를 여는 따옴표로 착각해서 그 다음부터
+          // 전부 잘못 해석된다.
+          let k = i + 1;
+          while (k < text.length && /[ \\t\\r\\n]/.test(text[k])) k++;
+          const startCh = text[k];
+          if (startCh !== undefined) {
+            const isQuote = startCh === '"';
+            const isBracket = startCh === '{' || startCh === '[';
+            const isNumberStart = /[0-9\\-]/.test(startCh);
+            const restSlice = text.slice(k, k + 5).toLowerCase();
+            const isBooleanOrNull = restSlice.indexOf('true') === 0 || restSlice.indexOf('false') === 0 || restSlice.indexOf('null') === 0;
+            if (!isQuote && !isBracket && !isNumberStart && !isBooleanOrNull) {
+              issues.push({ message: '여기서 " 가 빠져서 문자열이 아닌 값으로 잘못 해석되고 있습니다', index: k });
+              insertions.push({ index: k, char: '"' });
+            }
+          }
+          lastNonSpaceChar = ch;
           continue;
         }
         if (ch === '"') {
@@ -386,18 +418,8 @@ function buildRubiconScanScript() {
       return result;
     }
 
-    function applyInsertions(text, insertions) {
-      if (!insertions || insertions.length === 0) return text;
-      const sorted = insertions.slice().sort(function (a, b) { return b.index - a.index; });
-      let result = text;
-      sorted.forEach(function (ins) {
-        result = result.slice(0, ins.index) + ins.char + result.slice(ins.index);
-      });
-      return result;
-    }
-
-    // applyInsertions와 동일하지만, 삽입한 문자들이 원문 어느 위치에서 왔는지 계속
-    // 추적할 수 있도록 인덱스 매핑 배열도 같이 갱신해서 반환한다.
+    // 텍스트에 insertions를 적용하면서, 삽입한 문자들이 원문 어느 위치에서 왔는지
+    // 계속 추적할 수 있도록 인덱스 매핑 배열도 같이 갱신해서 반환한다.
     function applyInsertionsWithMapping(text, insertions, mapping) {
       const sorted = insertions.slice().sort(function (a, b) { return a.index - b.index; });
       let resultText = '';
@@ -420,12 +442,14 @@ function buildRubiconScanScript() {
       return { text: resultText, mapping: resultMapping };
     }
 
-    // 원문 화면에 보여줄 진단 목록을 만든다. diagnoseStructure는 한 번 훑을 때 발견되는
-    // 문제를 전부 보고하는데, 앞쪽에서 따옴표/괄호가 하나라도 깨지면 그 뒤 전체가 잘못
-    // 해석되어 실제로는 문제 없는 부분까지 대량의 오탐(가짜 콤마 누락 등)으로 쏟아질 수
-    // 있다. 그래서 한 패스마다 "이번에 실제로 고친 것"만 원문 기준 위치로 변환해서 채택하고,
-    // 고친 뒤 다시 진단하는 과정을 반복해서 진짜 남아있는 문제만 정확한 위치로 보여준다.
-    function diagnoseForDisplay(text) {
+    // 원문 화면에 보여줄 진단 목록을 만들고, 그 과정에서 나온 복구된 텍스트도 같이
+    // 반환한다(파싱 경로에서 재사용해서 똑같은 진단을 두 번 반복하지 않기 위함).
+    // diagnoseStructure는 한 번 훑을 때 발견되는 문제를 전부 보고하는데, 앞쪽에서
+    // 따옴표/괄호가 하나라도 깨지면 그 뒤 전체가 잘못 해석되어 실제로는 문제 없는
+    // 부분까지 대량의 오탐(가짜 콤마 누락 등)으로 쏟아질 수 있다. 그래서 한 패스마다
+    // "이번에 실제로 고친 것"만 원문 기준 위치로 변환해서 채택하고, 고친 뒤 다시
+    // 진단하는 과정을 반복해서 진짜 남아있는 문제만 정확한 위치로 보여준다.
+    function diagnoseAndRepair(text) {
       const finalIssues = [];
       let current = text;
       let mapping = [];
@@ -468,36 +492,7 @@ function buildRubiconScanScript() {
         mapping = applied.mapping;
       }
 
-      return finalIssues;
-    }
-
-    // 문자열이 안 닫혀 있으면 그 뒤의 중괄호/대괄호 개수 자체가 부정확하게 잡히기 때문에,
-    // 따옴표 문제부터 먼저 고치고 다시 진단하는 식으로 여러 단계에 걸쳐 복구를 시도한다.
-    // null 대소문자 정규화는 문자열 경계가 맞아야 정확하므로(안 닫힌 문자열이 있으면
-    // 그 뒤의 Null까지 "문자열 안"으로 착각해서 정규화를 건너뜀) 구조 복구를 마친 뒤에 한다.
-    function repairAndParse(text) {
-      let current = text;
-      for (let pass = 0; pass < 5; pass++) {
-        const d = diagnoseStructure(current);
-        if (d.insertions.length === 0) break;
-        const quoteInsertions = d.insertions.filter(function (ins) {
-          return ins.char.indexOf('"') !== -1;
-        });
-        const toApply = quoteInsertions.length > 0 ? quoteInsertions : d.insertions;
-        const next = applyInsertions(current, toApply);
-        if (next === current) break;
-        current = next;
-        try {
-          return JSON.parse(normalizeNullLiterals(current));
-        } catch (e) {
-          // 다음 패스로 계속
-        }
-      }
-      try {
-        return JSON.parse(normalizeNullLiterals(current));
-      } catch (e) {
-        return null;
-      }
+      return { issues: finalIssues, repairedText: current };
     }
 
     const RUBICON_ID = 'benefits-data';
@@ -510,7 +505,7 @@ function buildRubiconScanScript() {
     const groupKey = '#' + scriptEl.id;
     const path = cssPath(scriptEl);
     const rawText = scriptEl.textContent;
-    const structuralIssues = diagnoseForDisplay(rawText);
+    const diagnosis = diagnoseAndRepair(rawText);
 
     // 문법 유효성과 관계없이 원문 내용을 그대로 노출하고, 구조적 문제(따옴표/괄호)도 정확한 위치와 함께 진단
     results.push({
@@ -519,7 +514,7 @@ function buildRubiconScanScript() {
       path: path,
       group: groupKey,
       text: rawText,
-      structuralIssues: structuralIssues,
+      structuralIssues: diagnosis.issues,
       attrs: []
     });
 
@@ -544,9 +539,15 @@ function buildRubiconScanScript() {
       let data = attempt(rawText);
 
       if (!data) {
-        // 원문 진단 결과(어긋난 위치의 따옴표/괄호)를 근거로 정확한 위치에 채워 넣어
-        // 단계적으로 재시도한다 (문자열을 먼저 닫아야 그 뒤의 괄호가 제대로 보이므로)
-        data = repairAndParse(rawText);
+        // 위에서 이미 구해둔 복구 결과(어긋난 위치의 따옴표/괄호를 채워 넣은 텍스트)를
+        // 그대로 재사용한다 - 진단을 처음부터 다시 반복하지 않기 위함.
+        // null 대소문자 정규화는 문자열 경계가 맞아야 정확하므로(안 닫힌 문자열이 있으면
+        // 그 뒤의 Null까지 "문자열 안"으로 착각해서 정규화를 건너뜀) 구조 복구 이후에 한다.
+        try {
+          data = JSON.parse(normalizeNullLiterals(diagnosis.repairedText));
+        } catch (e) {
+          data = null;
+        }
       }
 
       if (!data || typeof data !== 'object') return;
