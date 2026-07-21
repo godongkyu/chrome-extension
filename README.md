@@ -27,3 +27,4 @@
 - **2026-07-20 (ver8)**: 외부 js 파일 스캔 범위를 앵커드URL 탭만으로 한정 (이벤트 번호 탭은 인라인 `<script>`만 스캔하던 기존 방식으로 되돌림)
 - **2026-07-21 (ver9)**: 앵커드URL 탭 클릭 시 딜레이 발생 문제 수정 — GA/GTM/CDN 라이브러리 등 다른 도메인 `<script src>`까지 전부 동기 요청을 시도해서 CORS 실패를 기다리느라 느려지고 있었음. 같은 origin 스크립트만 읽도록 필터 추가 (테스트 환경 기준 약 254ms → 10ms)
 - **2026-07-21 (ver10)**: GitHub 저장소([godongkyu/chrome-extension](https://github.com/godongkyu/chrome-extension))로 이전, `main`/`dev` 브랜치 구성 (`dev`에서 작업 후 `main`으로 병합). 상단 크레딧을 "Made by Bstones" 텍스트에서 Bstones 로고 이미지로 교체 (다크 모드에서도 잘 보이도록 흰 배경 적용)
+- **2026-07-21 (ver11)**: 루비콘 탭에서 `benefit_start_datetime`처럼 대소문자 구분 없는 `Null`/`null` 리터럴 값(기간 없음을 뜻하는 의도적인 null)이 빈값(`empty`)으로 잘못 표시되던 문제 수정. 실제 null 값은 "null"로 표시하고 빈값 배지를 붙이지 않되, 빈 문자열(`""`)은 계속 빈값으로 정상 표시
