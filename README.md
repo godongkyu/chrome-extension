@@ -26,3 +26,4 @@
 - **2026-07-20 (ver7)**: ver6에서 외부 js 파일을 `fetch`(비동기)로 읽도록 구현했다가 `chrome.devtools.inspectedWindow.eval()`이 Promise를 기다려주지 않아 실제 패널에서 "lastResults.forEach is not a function" 오류가 발생하는 버그 발견 → 동기(synchronous) XHR 방식으로 교체해서 수정. CDP로 실제 eval 동작(Promise 비대기)까지 재현해서 회귀 검증 완료
 - **2026-07-20 (ver8)**: 외부 js 파일 스캔 범위를 앵커드URL 탭만으로 한정 (이벤트 번호 탭은 인라인 `<script>`만 스캔하던 기존 방식으로 되돌림)
 - **2026-07-21 (ver9)**: 앵커드URL 탭 클릭 시 딜레이 발생 문제 수정 — GA/GTM/CDN 라이브러리 등 다른 도메인 `<script src>`까지 전부 동기 요청을 시도해서 CORS 실패를 기다리느라 느려지고 있었음. 같은 origin 스크립트만 읽도록 필터 추가 (테스트 환경 기준 약 254ms → 10ms)
+- **2026-07-21 (ver10)**: GitHub 저장소([godongkyu/chrome-extension](https://github.com/godongkyu/chrome-extension))로 이전, `main`/`dev` 브랜치 구성 (`dev`에서 작업 후 `main`으로 병합). 상단 크레딧을 "Made by Bstones" 텍스트에서 Bstones 로고 이미지로 교체 (다크 모드에서도 잘 보이도록 흰 배경 적용)
