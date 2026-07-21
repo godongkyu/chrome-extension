@@ -216,6 +216,9 @@ function buildRubiconScanScript() {
       //  뒤쪽 줄의 따옴표를 엉뚱하게 자기 닫는 따옴표로 착각해서 실제 위치보다 훨씬 뒤를
       //  가리키는 문제를 방지한다)
       let unresolvedQuoteLineEnd = -1;
+      // "{"/"[" 바로 앞의 마지막 유효 문자를 기억해뒀다가, 배열 대괄호가 통째로 빠진
+      // 경우("key": {...} 다음에 콤마 찍고 새 키 없이 또 { 가 오는 패턴)를 감지하는 데 쓴다.
+      let lastNonSpaceChar = '';
 
       function handleLineEnd(endIndex) {
         // CRLF 줄바꿈이면 \\r 는 줄 내용에 포함시키지 않고 그 앞을 줄 끝으로 본다
@@ -258,18 +261,41 @@ function buildRubiconScanScript() {
           }
           continue;
         }
+        if (ch === ' ' || ch === '\\t' || ch === '\\r') {
+          continue;
+        }
         if (ch === '"') {
           inString = true;
+          lastNonSpaceChar = ch;
           continue;
         }
         if (ch === '{' || ch === '[') {
-          stack.push({ char: ch, index: i });
+          stack.push({ char: ch, index: i, viaColon: lastNonSpaceChar === ':' });
+          lastNonSpaceChar = ch;
           continue;
         }
         if (ch === '}' || ch === ']') {
           const expected = ch === '}' ? '{' : '[';
           if (stack.length > 0 && stack[stack.length - 1].char === expected) {
-            stack.pop();
+            const popped = stack.pop();
+            if (popped.viaColon) {
+              // "key": {...} 다음에 콤마를 찍고 새 키(따옴표) 없이 바로 { 또는 [ 가 나오면,
+              // 배열 대괄호 [ ] 가 통째로 빠져서 여러 객체가 한 값처럼 잘못 이어붙은 것으로
+              // 본다. 이 값이 시작되는 위치에 가상의 [ 를 끼워 넣어 이후 스캔을 배열로
+              // 인식시킨다 (짝이 되는 닫는 ] 는 뒤에서 기존 짝 안맞음 로직이 자연스럽게 잡아줌)
+              let k = i + 1;
+              while (k < text.length && /[ \\t\\r\\n]/.test(text[k])) k++;
+              if (text[k] === ',') {
+                let k2 = k + 1;
+                while (k2 < text.length && /[ \\t\\r\\n]/.test(text[k2])) k2++;
+                if (text[k2] === '{' || text[k2] === '[') {
+                  issues.push({ message: '여기서 [ 가 빠져서 배열이 아닌 객체(들)로 잘못 해석되고 있습니다', index: popped.index });
+                  insertions.push({ index: popped.index, char: '[' });
+                  stack.push({ char: '[', index: popped.index, virtual: true });
+                }
+              }
+            }
+            lastNonSpaceChar = ch;
             continue;
           }
           if (stack.length > 0) {
@@ -287,7 +313,10 @@ function buildRubiconScanScript() {
           } else {
             issues.push({ message: '짝이 맞지 않는 여분의 ' + ch + ' 가 있습니다', index: i });
           }
+          lastNonSpaceChar = ch;
+          continue;
         }
+        lastNonSpaceChar = ch;
       }
       handleLineEnd(text.length);
 
@@ -367,10 +396,87 @@ function buildRubiconScanScript() {
       return result;
     }
 
+    // applyInsertions와 동일하지만, 삽입한 문자들이 원문 어느 위치에서 왔는지 계속
+    // 추적할 수 있도록 인덱스 매핑 배열도 같이 갱신해서 반환한다.
+    function applyInsertionsWithMapping(text, insertions, mapping) {
+      const sorted = insertions.slice().sort(function (a, b) { return a.index - b.index; });
+      let resultText = '';
+      const resultMapping = [];
+      let cursor = 0;
+      sorted.forEach(function (ins) {
+        resultText += text.slice(cursor, ins.index);
+        for (let p = cursor; p < ins.index; p++) resultMapping.push(mapping[p]);
+        const anchorOrig = ins.index < mapping.length
+          ? mapping[ins.index]
+          : (mapping.length > 0 ? mapping[mapping.length - 1] + 1 : ins.index);
+        for (let c = 0; c < ins.char.length; c++) {
+          resultText += ins.char[c];
+          resultMapping.push(anchorOrig);
+        }
+        cursor = ins.index;
+      });
+      resultText += text.slice(cursor);
+      for (let p = cursor; p < text.length; p++) resultMapping.push(mapping[p]);
+      return { text: resultText, mapping: resultMapping };
+    }
+
+    // 원문 화면에 보여줄 진단 목록을 만든다. diagnoseStructure는 한 번 훑을 때 발견되는
+    // 문제를 전부 보고하는데, 앞쪽에서 따옴표/괄호가 하나라도 깨지면 그 뒤 전체가 잘못
+    // 해석되어 실제로는 문제 없는 부분까지 대량의 오탐(가짜 콤마 누락 등)으로 쏟아질 수
+    // 있다. 그래서 한 패스마다 "이번에 실제로 고친 것"만 원문 기준 위치로 변환해서 채택하고,
+    // 고친 뒤 다시 진단하는 과정을 반복해서 진짜 남아있는 문제만 정확한 위치로 보여준다.
+    function diagnoseForDisplay(text) {
+      const finalIssues = [];
+      let current = text;
+      let mapping = [];
+      for (let p = 0; p < text.length; p++) mapping.push(p);
+
+      function toOriginalIndex(idx) {
+        if (idx === null || idx === undefined) return idx;
+        if (idx < mapping.length) return mapping[idx];
+        return mapping.length > 0 ? mapping[mapping.length - 1] + 1 : idx;
+      }
+
+      for (let pass = 0; pass < 8; pass++) {
+        const d = diagnoseStructure(current);
+        if (d.issues.length === 0) break;
+
+        if (d.insertions.length === 0) {
+          // 삽입만으로는 못 고치는 문제(예: 여분의 닫는 괄호)만 남은 경우 -
+          // 더 반복해도 나아지지 않으므로 남은 문제를 그대로 보여주고 끝낸다
+          d.issues.forEach(function (issue) {
+            finalIssues.push({ message: issue.message, index: toOriginalIndex(issue.index) });
+          });
+          break;
+        }
+
+        const quoteFixes = d.insertions.filter(function (ins) {
+          return ins.char.indexOf('"') !== -1;
+        });
+        const toApply = quoteFixes.length > 0 ? quoteFixes : d.insertions;
+        const toApplyIndexes = {};
+        toApply.forEach(function (ins) { toApplyIndexes[ins.index] = true; });
+
+        d.issues.forEach(function (issue) {
+          if (!toApplyIndexes[issue.index]) return;
+          finalIssues.push({ message: issue.message, index: toOriginalIndex(issue.index) });
+        });
+
+        const applied = applyInsertionsWithMapping(current, toApply, mapping);
+        if (applied.text === current) break;
+        current = applied.text;
+        mapping = applied.mapping;
+      }
+
+      return finalIssues;
+    }
+
     // 문자열이 안 닫혀 있으면 그 뒤의 중괄호/대괄호 개수 자체가 부정확하게 잡히기 때문에,
     // 따옴표 문제부터 먼저 고치고 다시 진단하는 식으로 여러 단계에 걸쳐 복구를 시도한다.
+    // null 대소문자 정규화는 문자열 경계가 맞아야 정확하므로(안 닫힌 문자열이 있으면
+    // 그 뒤의 Null까지 "문자열 안"으로 착각해서 정규화를 건너뜀) 구조 복구를 마친 뒤에 한다.
     function repairAndParse(text) {
-      let current = normalizeNullLiterals(text);
+      let current = text;
       for (let pass = 0; pass < 5; pass++) {
         const d = diagnoseStructure(current);
         if (d.insertions.length === 0) break;
@@ -382,13 +488,13 @@ function buildRubiconScanScript() {
         if (next === current) break;
         current = next;
         try {
-          return JSON.parse(current);
+          return JSON.parse(normalizeNullLiterals(current));
         } catch (e) {
           // 다음 패스로 계속
         }
       }
       try {
-        return JSON.parse(current);
+        return JSON.parse(normalizeNullLiterals(current));
       } catch (e) {
         return null;
       }
@@ -404,7 +510,7 @@ function buildRubiconScanScript() {
     const groupKey = '#' + scriptEl.id;
     const path = cssPath(scriptEl);
     const rawText = scriptEl.textContent;
-    const diagnosis = diagnoseStructure(rawText);
+    const structuralIssues = diagnoseForDisplay(rawText);
 
     // 문법 유효성과 관계없이 원문 내용을 그대로 노출하고, 구조적 문제(따옴표/괄호)도 정확한 위치와 함께 진단
     results.push({
@@ -413,7 +519,7 @@ function buildRubiconScanScript() {
       path: path,
       group: groupKey,
       text: rawText,
-      structuralIssues: diagnosis.issues,
+      structuralIssues: structuralIssues,
       attrs: []
     });
 
