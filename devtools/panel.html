@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>QA Checker</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <div class="tabbar">
+    <button class="tab-btn active" data-tab="dom">속성 검사</button>
+    <button class="tab-btn" data-tab="rubicon">루비콘</button>
+    <button class="tab-btn" data-tab="eventNumber">이벤트 번호</button>
+    <button class="tab-btn" data-tab="anchoredUrl">앵커드URL</button>
+    <span class="credit">Made by Bstones</span>
+  </div>
+  <div class="toolbar">
+    <button id="scanBtn">다시 검사</button>
+    <label><input type="checkbox" id="emptyOnly" /> 빈 값만 보기</label>
+    <span id="summary"></span>
+  </div>
+  <div id="tabNotice" class="tab-notice" hidden></div>
+  <div id="resultContainer"></div>
+  <script src="panel.js"></script>
+</body>
+</html>

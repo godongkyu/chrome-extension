@@ -1,0 +1,59 @@
+QA Checker 크롬 익스텐션
+========================
+
+개발자도구(F12)에 "QA Checker" 탭을 추가한다. 페이지 새로고침 시 자동으로
+다시 스캔되고, 결과의 "찾기" 버튼을 누르면 해당 요소로 이동+하이라이트된다.
+
+하위 탭 4개
+-----------
+- 속성 검사: href, title, alt, data-omni, data-omni-type 값이 비어있는지 검사
+  (화면에 안 보이는 요소는 자동 제외). a/button/img는 필수 속성 자체가
+  없는 경우도 별도로 표시. `.sec_project_wrap` 안의 요소만 대상.
+
+- 루비콘: id="benefits-data" 스크립트의 JSON을 원문 그대로 노출하고,
+  필드별 빈값/형식 오류(URL, 공백, 괄호 등)와 문법 오류(따옴표·괄호 짝)를
+  정확한 위치와 함께 진단한다. 문법이 깨져 있어도 자동 복구를 시도해서
+  가능하면 필드별 목록도 계속 보여준다.
+
+- 이벤트 번호: fnCallPop2/7/8/14, fnCheckWinConstraints 호출 인자와
+  data-popup-target, data-cpNum 값을 검사한다. onclick 속성뿐 아니라
+  <script> 안의 인라인 JS 코드(콜백 함수 등)까지 스캔하고, 가능하면 그
+  함수를 실제로 호출하는 페이지 요소까지 찾아서 그쪽으로 이동시켜준다.
+  `.sec_project_wrap` 안의 요소(또는 그 안 요소가 트리거하는 콜백)만 대상.
+  (인라인 <script>만 스캔하며, 외부 .js 파일 내용은 읽지 않는다)
+
+- 앵커드URL: <script> 안의 `anchor.load([...])` 호출에서 각 항목의
+  url/target/click 값을 괄호·문법 오류와 무관하게 문자열 스캔으로 추출한다.
+  target 셀렉터가 `.sec_project_wrap` 안의 실제 요소를 가리키는 항목만 표시.
+
+  ※ 앵커드URL 탭은 <script src="...">로 분리된 외부 js 파일도 같은 origin이면
+  동기 XHR로 읽어와 같이 스캔한다. 단 file://로 직접 연 페이지는 브라우저
+  보안 정책상 외부 파일 요청이 막혀서 이 경우엔 못 찾을 수 있다
+  (localhost 등 서버로 열면 정상 동작).
+
+
+폴더 구조
+---------
+chrome extension/
+├── manifest.json          루트 고정, devtools_page만 등록
+└── devtools/
+    ├── devtools.html/.js  "QA Checker" 패널 등록
+    ├── panel.html/.css    패널 화면 · 스타일
+    └── panel.js           스캔 로직 + 렌더링 (핵심 파일)
+
+
+경로 관련 주의사항 (헷갈리기 쉬운 부분)
+--------------------------------------
+- manifest.json 안의 경로, chrome.devtools.panels.create()의 pagePath
+  → 루트(manifest.json 위치) 기준 상대경로
+- html 안의 <script src>, <link href>
+  → 그 html 파일이 있는 폴더 기준 상대경로
+
+panels.create()의 pagePath만 예외적으로 루트 기준이라 실수하기 쉽다.
+devtools.js: panels.create('QA Checker', '', 'devtools/panel.html')
+→ 'panel.html'이 아니라 'devtools/panel.html'로 루트부터 써야 함.
+
+
+배포할 때
+---------
+manifest.json + devtools/ 폴더만 압축해서 전달하면 된다.
