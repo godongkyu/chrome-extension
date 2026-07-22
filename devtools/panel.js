@@ -13,6 +13,10 @@ const REQUIRED_ATTRS_BY_TAG = {
   img: ['loading', 'alt']
 };
 
+// data-popup-target 값이 이 목록에 있는 a태그는 onclick 속성이 있는지도 같이 검사한다
+// (팝업을 여는 트리거인데 onclick 자체가 통째로 빠진 경우를 잡기 위함)
+const POPUP_TARGET_REQUIRES_ONCLICK = ['popupExhibitionEnter'];
+
 // 속성 검사 탭은 이 셀렉터에 해당하는 영역 안의 요소만 스캔한다 (null/빈 값이면 전체 스캔)
 const SCAN_SCOPE_SELECTOR = '.sec_project_wrap';
 
@@ -69,13 +73,14 @@ const INJECTED_HELPERS = `
   }
 `;
 
-function buildDomScanScript(attrs, onclickFns, requiredAttrsByTag, scanScopeSelector) {
+function buildDomScanScript(attrs, onclickFns, requiredAttrsByTag, scanScopeSelector, popupTargetRequiresOnclick) {
   return `(function () {
     ${INJECTED_HELPERS}
     const attrs = ${JSON.stringify(attrs)};
     const onclickFns = ${JSON.stringify(onclickFns)};
     const requiredAttrsByTag = ${JSON.stringify(requiredAttrsByTag)};
     const scanScopeSelector = ${JSON.stringify(scanScopeSelector)};
+    const popupTargetRequiresOnclick = ${JSON.stringify(popupTargetRequiresOnclick)};
     function isVisible(el) {
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
@@ -152,6 +157,20 @@ function buildDomScanScript(attrs, onclickFns, requiredAttrsByTag, scanScopeSele
           });
         }
       });
+      if (
+        el.tagName.toLowerCase() === 'a' &&
+        popupTargetRequiresOnclick.indexOf(el.getAttribute('data-popup-target')) !== -1
+      ) {
+        // 팝업을 여는 트리거(data-popup-target)인데 onclick 자체가 없는 경우를 잡는다
+        const hasOnclick = el.hasAttribute('onclick');
+        const onclickValue = hasOnclick ? el.getAttribute('onclick') : null;
+        matched.push({
+          attr: 'onclick',
+          value: onclickValue,
+          empty: hasOnclick ? isEmptyVal(onclickValue) : true,
+          missing: !hasOnclick
+        });
+      }
       if (matched.length > 0) {
         results.push({
           kind: 'dom',
@@ -219,13 +238,6 @@ function buildRubiconScanScript() {
       const stack = []; // { char: '{'|'[', index }
       let inString = false;
       let escape = false;
-      let lineStartInString = false;
-      // 문자열이 줄 중간에서 열렸는데 그 줄 끝까지 안 닫힌 경우, 그 지점을 후보로 기억.
-      // 그 다음 줄에서 정상적으로 닫히면 후보를 해제한다.
-      // (전체 텍스트 끝에서 봤을 때 '어디서부터' 안 닫힌 상태가 이어져왔는지 정확히 짚기 위함 -
-      //  뒤쪽 줄의 따옴표를 엉뚱하게 자기 닫는 따옴표로 착각해서 실제 위치보다 훨씬 뒤를
-      //  가리키는 문제를 방지한다)
-      let unresolvedQuoteLineEnd = -1;
       // "{"/"[" 바로 앞의 마지막 유효 문자를 기억해뒀다가, 배열 대괄호가 통째로 빠진
       // 경우("key": {...} 다음에 콤마 찍고 새 키 없이 또 { 가 오는 패턴)를 감지하는 데 쓴다.
       let lastNonSpaceChar = '';
@@ -236,12 +248,23 @@ function buildRubiconScanScript() {
         //  raw control character로 남아 다시 파싱에 실패한다)
         let realEnd = endIndex;
         if (realEnd > 0 && text[realEnd - 1] === '\\r') realEnd--;
-        if (!lineStartInString && inString) {
-          unresolvedQuoteLineEnd = realEnd;
-        } else if (lineStartInString && !inString) {
-          unresolvedQuoteLineEnd = -1;
+        if (!inString) return;
+        // JSON 문자열은 원래 줄바꿈을 그대로 포함할 수 없으므로, 이 줄이 끝날 때까지
+        // 문자열이 안 닫혔다는 것 자체가 곧 "닫는 따옴표 누락"이다. 뒤쪽 줄에 있는
+        // 다른(무관한) 따옴표 문제 때문에 우연히 짝이 맞아떨어져서 "그 사이 어딘가에서
+        // 해결됐다"고 착각하지 않도록, 여기서 즉시 보고하고 이 지점에서 문자열을
+        // 닫은 것으로 치고 계속 진행한다 (그래야 이후 스캔이 이 문제 하나 때문에
+        // 통째로 잘못 해석되는 걸 막는다).
+        issues.push({ message: '문자열이 닫히지 않았습니다 - 이 줄 끝에 닫는 따옴표가 빠진 것으로 보입니다', index: realEnd });
+        let insertText = '"';
+        let k = realEnd;
+        while (k < text.length && /[ \\t\\r\\n]/.test(text[k])) k++;
+        const nextCh = text[k];
+        if (nextCh !== undefined && nextCh !== ',' && nextCh !== '}' && nextCh !== ']' && nextCh !== ':') {
+          insertText += ',';
         }
-        lineStartInString = inString;
+        insertions.push({ index: realEnd, char: insertText });
+        inString = false;
       }
 
       for (let i = 0; i < text.length; i++) {
@@ -350,21 +373,8 @@ function buildRubiconScanScript() {
         }
         lastNonSpaceChar = ch;
       }
+      // 문서 끝에서 문자열이 아직 열려 있으면(끝까지 닫는 따옴표를 못 찾음) 여기서 마저 보고한다
       handleLineEnd(text.length);
-
-      if (inString) {
-        const pos = unresolvedQuoteLineEnd !== -1 ? unresolvedQuoteLineEnd : text.length;
-        issues.push({ message: '문자열이 닫히지 않았습니다 - 이 줄 끝에 닫는 따옴표가 빠진 것으로 보입니다', index: pos });
-        // 닫는 따옴표만 넣으면 되는지, 다음 필드와의 콤마도 같이 빠졌는지 확인해서 같이 채운다
-        let insertText = '"';
-        let k = pos;
-        while (k < text.length && /[ \\t\\r\\n]/.test(text[k])) k++;
-        const nextCh = text[k];
-        if (nextCh !== undefined && nextCh !== ',' && nextCh !== '}' && nextCh !== ']' && nextCh !== ':') {
-          insertText += ',';
-        }
-        insertions.push({ index: pos, char: insertText });
-      }
 
       stack.slice().reverse().forEach(function (entry) {
         const missingClose = entry.char === '{' ? '}' : ']';
@@ -461,7 +471,7 @@ function buildRubiconScanScript() {
         return mapping.length > 0 ? mapping[mapping.length - 1] + 1 : idx;
       }
 
-      for (let pass = 0; pass < 8; pass++) {
+      for (let pass = 0; pass < 20; pass++) {
         const d = diagnoseStructure(current);
         if (d.issues.length === 0) break;
 
@@ -477,7 +487,13 @@ function buildRubiconScanScript() {
         const quoteFixes = d.insertions.filter(function (ins) {
           return ins.char.indexOf('"') !== -1;
         });
-        const toApply = quoteFixes.length > 0 ? quoteFixes : d.insertions;
+        // 따옴표 문제가 한 패스에 여러 개 잡히면, 뒤쪽 것들은 앞쪽 따옴표 문제 때문에
+        // 문자열 경계가 이미 헝클어진 상태에서 진단된 것이라 위치가 부정확할 수 있다.
+        // 그래서 가장 앞에 있는 것 하나만 고치고, 나머지는 다음 패스에서 (문자열 경계가
+        // 바로잡힌 뒤) 새로 진단해서 정확한 위치로 잡아낸다.
+        const toApply = quoteFixes.length > 0
+          ? [quoteFixes.reduce(function (a, b) { return a.index <= b.index ? a : b; })]
+          : d.insertions;
         const toApplyIndexes = {};
         toApply.forEach(function (ins) { toApplyIndexes[ins.index] = true; });
 
@@ -1078,7 +1094,7 @@ function buildAnchoredUrlScanScript(scanScopeSelector) {
 }
 
 const TABS = {
-  dom: { label: '속성 검사', build: () => buildDomScanScript(ATTRS, ONCLICK_FNS, REQUIRED_ATTRS_BY_TAG, SCAN_SCOPE_SELECTOR) },
+  dom: { label: '속성 검사', build: () => buildDomScanScript(ATTRS, ONCLICK_FNS, REQUIRED_ATTRS_BY_TAG, SCAN_SCOPE_SELECTOR, POPUP_TARGET_REQUIRES_ONCLICK) },
   rubicon: { label: '루비콘', build: () => buildRubiconScanScript() },
   eventNumber: { label: '이벤트 번호', build: () => buildEventNumberScanScript(SCAN_SCOPE_SELECTOR) },
   anchoredUrl: { label: '앵커드URL', build: () => buildAnchoredUrlScanScript(SCAN_SCOPE_SELECTOR) }
