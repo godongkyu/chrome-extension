@@ -13,6 +13,10 @@ const REQUIRED_ATTRS_BY_TAG = {
   img: ['loading', 'alt']
 };
 
+// data-popup-target 값이 이 목록에 있는 a태그는 onclick 속성이 있는지도 같이 검사한다
+// (팝업을 여는 트리거인데 onclick 자체가 통째로 빠진 경우를 잡기 위함)
+const POPUP_TARGET_REQUIRES_ONCLICK = ['popupExhibitionEnter'];
+
 // 속성 검사 탭은 이 셀렉터에 해당하는 영역 안의 요소만 스캔한다 (null/빈 값이면 전체 스캔)
 const SCAN_SCOPE_SELECTOR = '.sec_project_wrap';
 
@@ -69,13 +73,14 @@ const INJECTED_HELPERS = `
   }
 `;
 
-function buildDomScanScript(attrs, onclickFns, requiredAttrsByTag, scanScopeSelector) {
+function buildDomScanScript(attrs, onclickFns, requiredAttrsByTag, scanScopeSelector, popupTargetRequiresOnclick) {
   return `(function () {
     ${INJECTED_HELPERS}
     const attrs = ${JSON.stringify(attrs)};
     const onclickFns = ${JSON.stringify(onclickFns)};
     const requiredAttrsByTag = ${JSON.stringify(requiredAttrsByTag)};
     const scanScopeSelector = ${JSON.stringify(scanScopeSelector)};
+    const popupTargetRequiresOnclick = ${JSON.stringify(popupTargetRequiresOnclick)};
     function isVisible(el) {
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
@@ -152,6 +157,20 @@ function buildDomScanScript(attrs, onclickFns, requiredAttrsByTag, scanScopeSele
           });
         }
       });
+      if (
+        el.tagName.toLowerCase() === 'a' &&
+        popupTargetRequiresOnclick.indexOf(el.getAttribute('data-popup-target')) !== -1
+      ) {
+        // 팝업을 여는 트리거(data-popup-target)인데 onclick 자체가 없는 경우를 잡는다
+        const hasOnclick = el.hasAttribute('onclick');
+        const onclickValue = hasOnclick ? el.getAttribute('onclick') : null;
+        matched.push({
+          attr: 'onclick',
+          value: onclickValue,
+          empty: hasOnclick ? isEmptyVal(onclickValue) : true,
+          missing: !hasOnclick
+        });
+      }
       if (matched.length > 0) {
         results.push({
           kind: 'dom',
@@ -1075,7 +1094,7 @@ function buildAnchoredUrlScanScript(scanScopeSelector) {
 }
 
 const TABS = {
-  dom: { label: '속성 검사', build: () => buildDomScanScript(ATTRS, ONCLICK_FNS, REQUIRED_ATTRS_BY_TAG, SCAN_SCOPE_SELECTOR) },
+  dom: { label: '속성 검사', build: () => buildDomScanScript(ATTRS, ONCLICK_FNS, REQUIRED_ATTRS_BY_TAG, SCAN_SCOPE_SELECTOR, POPUP_TARGET_REQUIRES_ONCLICK) },
   rubicon: { label: '루비콘', build: () => buildRubiconScanScript() },
   eventNumber: { label: '이벤트 번호', build: () => buildEventNumberScanScript(SCAN_SCOPE_SELECTOR) },
   anchoredUrl: { label: '앵커드URL', build: () => buildAnchoredUrlScanScript(SCAN_SCOPE_SELECTOR) }
