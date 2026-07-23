@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "QA Checker",
+  "name": "QA Checker_BS",
   "version": "1.1",
   "description": "href, title, alt, data-omni 등 속성의 빈 값 여부를 DevTools에서 검사",
   "devtools_page": "devtools/devtools.html",
