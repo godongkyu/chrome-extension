@@ -4,6 +4,8 @@
 
 자세한 구조는 [폴더_구조_설명.txt](./폴더_구조_설명.txt) 참고.
 
+구글 크롬 웹 스토어에 배포완료 경로 : https://chromewebstore.google.com/detail/halcbplaomflmanefbdoobabfpaghglo?utm_source=item-share-cb
+
 ## 설치 (개발자 모드로 로드하기)
 
 1. 이 저장소를 클론하거나 다운로드한다.
