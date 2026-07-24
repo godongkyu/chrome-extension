@@ -4,7 +4,11 @@
 
 자세한 구조는 [폴더_구조_설명.txt](./폴더_구조_설명.txt) 참고.
 
+크롬 웹 스토어에 `QA Checker_BS`로 정식 배포됨: https://chromewebstore.google.com/detail/qa-checkerbs/halcbplaomflmanefbdoobabfpaghglo?utm_source=item-share-cb
+
 ## 설치 (개발자 모드로 로드하기)
+
+위 스토어 링크에서 바로 설치하거나, 개발 중인 코드를 직접 테스트하려면 아래 방법을 따른다.
 
 1. 이 저장소를 클론하거나 다운로드한다.
 2. Chrome 주소창에 `chrome://extensions` 입력.
@@ -23,3 +27,4 @@
 - **2026-07-21 (ver4)**: GitHub 저장소로 이전 (`main`/`dev` 브랜치 운영), 로고 교체, 루비콘 진단 정확도(오탐 제거, null 처리, 여는/닫는 따옴표·배열 괄호 누락 감지) 및 속도 대폭 개선. 서로 다른 오류가 한 문서에 여러 개 겹칠 때 정확히 분리해서 진단하도록 진단 로직 강화 (문자열 미종료 감지를 즉시·확정적으로 처리하도록 재설계)
 - **2026-07-22 (ver5)**: 속성 검사 탭에 `data-popup-target="popupExhibitionEnter"`인 a태그의 onclick 속성 존재 여부 검사 추가
 - **2026-07-23**: 크롬 웹 스토어 등록 준비 (아이콘·스크린샷·설명 문구 작성), 버전을 `1.1`로 업데이트
+- **2026-07-24**: 크롬 웹 스토어에 `QA Checker_BS`로 정식 배포 완료
